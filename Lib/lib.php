@@ -231,10 +231,9 @@ function showList($cn, $qry, $pageno = 0, $count = 0, $url = "", $rowstart = "<t
     return $pagingstring;
 }
 
-;
-
 function getFileextension($filename) {
-    return end(explode(".", $filename));
+    $parts = explode('.', $filename);
+    return end($parts);
 }
 
 function CgangeSchedule($cn, $DB, $msgId, $scTime) {

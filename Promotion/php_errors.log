@@ -1,0 +1,1 @@
+[12-Apr-2016 15:46:45 ASIA/Dhaka] PHP Warning:  odbc_exec(): SQL error: [Microsoft][ODBC SQL Server Driver][SQL Server]String or binary data would be truncated., SQL state 22001 in SQLExecDirect in D:\wwwroot\BulkSMSWebPanel\Promotion\sms_edit.php on line 102

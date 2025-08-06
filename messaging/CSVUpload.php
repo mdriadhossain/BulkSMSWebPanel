@@ -1,7 +1,23 @@
 <?php
-$conn = PDOConnectDB();
-$userDetail = "SELECT UserID, UserName FROM BULKSMSPanel.dbo.UserInfo Order By UserName ASC";
-$result_userDetail = odbc_exec($cn, $userDetail);
+// Full cleaned single-file: CSV bulk upload -> SMSOutbox
+// Assumptions:
+// - PDOConnectDB() returns a PDO connected to BULKSMSGateway_1_0 (this file uses $conn)
+// - PDOConnectDB2() returns a PDO connected to BULKSMSPanel (this file uses $cn)
+// - Webserver can write uploaded CSV to __DIR__ . '/CSV/' and SQL Server service can read that file path (or a share)
+// - The rest of your application provides $User, base_url(), popup(), getFileextension() and other helpers
+
+// Initialize DB connections
+$conn = PDOConnectDB();   // BULKSMSGateway_1_0
+$cn   = PDOConnectDB2();  // BULKSMSPanel
+
+// Fetch user list for the select box (using $cn — the panel DB)
+try {
+    $stmtUsers = $cn->query("SELECT UserID, UserName FROM dbo.UserInfo ORDER BY UserName ASC");
+    $users = $stmtUsers->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    error_log("Error fetching users: " . $e->getMessage());
+    $users = [];
+}
 ?>
 <script language="javascript" type="text/javascript">
     function limitText(limitField, limitCount, limitNum) {
@@ -29,19 +45,18 @@ $result_userDetail = odbc_exec($cn, $userDetail);
                         <form class="form-horizontal" action="" method="post" enctype="multipart/form-data" name="SchedulePromotionID" id="user" >
 
                             <?php
-                            if ($User == "Admin" || $User == "admin") {
+                            // $User must be defined elsewhere in your app.
+                            if (isset($User) && ($User == "Admin" || $User == "admin")) {
                                 ?>
                                 <div class="form-group">
                                     <label for="focusedinput" class="col-sm-3 control-label">Select User Name :</label>
                                     <div class="col-sm-6">
-                                        <select name="opt" id="opt" type="text" class="form-control selectpicker"  data-live-search="true" onchange="ShowDropDown('opt', 'ShortCodeDiv', 'ShowMaskingId', 'ShowService')">
-                                            <option selected=''>please select user name</option>
+                                        <select name="opt" id="opt" class="form-control selectpicker"  data-live-search="true" onchange="ShowDropDown('opt', 'ShortCodeDiv', 'ShowMaskingId', 'ShowService')">
+                                            <option value=''>please select user name</option>
                                             <?php
-                                            while ($n = odbc_fetch_row($result_userDetail)) {
-
-                                                $UserID = odbc_result($result_userDetail, "UserID");
-                                                $UserName = odbc_result($result_userDetail, "UserName");
-                                                echo "<option value='$UserName'>$UserName</option>";
+                                            foreach ($users as $u) {
+                                                $UserName = htmlspecialchars($u['UserName']);
+                                                echo "<option value='{$UserName}'>{$UserName}</option>";
                                             }
                                             ?>
                                         </select>
@@ -53,12 +68,9 @@ $result_userDetail = odbc_exec($cn, $userDetail);
                                 <div class = "form-group">
                                     <label for="focusedinput" class="col-sm-3 control-label">User Name</label>
                                     <div class="col-sm-6">
-
-                                        <select name="opt" id="opt" type="text" class="form-control selectpicker"  data-live-search="true" onchange="ShowDropDown('opt', 'ShortCodeDiv', 'ShowMaskingId',
-                                                        'ShowService')">
-                                            <option selected=''>please select user name</option>
-                                            <option value='<?php echo $User; ?>'><?php echo $User; ?></option>
-                                            
+                                        <select name="opt" id="opt" class="form-control selectpicker"  data-live-search="true" onchange="ShowDropDown('opt', 'ShortCodeDiv', 'ShowMaskingId','ShowService')">
+                                            <option value=''>please select user name</option>
+                                            <option value='<?php echo htmlspecialchars($User); ?>'><?php echo htmlspecialchars($User); ?></option>
                                         </select>
                                     </div>
                                 </div>
@@ -68,50 +80,43 @@ $result_userDetail = odbc_exec($cn, $userDetail);
 
                             <div class="form-group">
                                 <label for="focusedinput" class="col-sm-3 control-label">Masking ID:</label>
-                                <div class="col-sm-6" id="ShortCodeDiv">
-
-                                </div>
+                                <div class="col-sm-6" id="ShortCodeDiv"></div>
                             </div>
 
                             <div>
                                 <label for="chkPassport">
-                                    Click on check box for Template Text SMS . 
+                                    Click on check box for Template Text SMS .
                                     <input type="checkbox" id="chkPassport" />
-
-                                </label> 
+                                </label>
                             </div>
 
                              <div id="autoUpdate" class="autoUpdate">
                                 <div class="form-group">
                                     <label for="focusedinput" class="col-sm-3 control-label">SMS Text</label>
-                                    <div class="col-sm-6">                                  
-                                        <div class="form-group">                                     
+                                    <div class="col-sm-6">
+                                        <div class="form-group">
                                             <div class="mt-radio-inline">
                                                 <label class="mt-radio">
-                                                    <input name="recipientsmsRadios" id="recipientsmsRadiosText"
-                                                           value="text" checked="checked" type="radio"> Text
+                                                    <input name="recipientsmsRadios" id="recipientsmsRadiosText" value="text" checked="checked" type="radio"> Text
                                                     <span></span>
                                                 </label>
                                                 <label class="mt-radio">
-                                                    <input name="recipientsmsRadios" id="recipientsmsRadiosUnicode"
-                                                           value="unicode" type="radio"> Unicode
+                                                    <input name="recipientsmsRadios" id="recipientsmsRadiosUnicode" value="unicode" type="radio"> Unicode
                                                     <span></span>
                                                 </label>
                                             </div>
                                         </div>
-                                        <textarea class="count_me form-control" name="message" rows="3" id="message" placeholder="write your text" required=""> </textarea>
+                                        <textarea class="count_me form-control" name="message" rows="3" id="message" placeholder="write your text" required></textarea>
                                         <div class="row">
-                                                <div style="float: right">
-                                                    <span class="charleft contacts-count">0 Characters | 235 Characters Left</span>
-                                                    <span class="parts-count">| 1 SMS (160 Char./SMS)</span>
-                                                </div>
-                                              
-                                                <input type="hidden" class="NumberOfSms" id="NumberOfSms" name="NumberOfSms">
-<!--                                            </div>-->
+                                            <div style="float: right">
+                                                <span class="charleft contacts-count">0 Characters | 235 Characters Left</span>
+                                                <span class="parts-count">| 1 SMS (160 Char./SMS)</span>
+                                            </div>
+                                            <input type="hidden" class="NumberOfSms" id="NumberOfSms" name="NumberOfSms">
                                         </div>
                                     </div>
                                 </div>
-                            </div>					
+                            </div>
 
                             <div id="dvPassport" style="display: none">
                                 <div class="form-group">
@@ -120,36 +125,35 @@ $result_userDetail = odbc_exec($cn, $userDetail);
                                         <select class="form-control" name="TemplateText" id="TemplateText">
                                             <option value=''>please select template text</option>
                                             <?php
-                                            //echo $User;
-
-                                            if ($User == 'Admin') {
-                                                echo $TemplateText = "SELECT TemplateSMS FROM BULKSMSPanel.dbo.TemplateText ";
-                                            } else {
-                                                echo $TemplateText = "SELECT TemplateSMS FROM BULKSMSPanel.dbo.TemplateText where UserName='$User' ";
-                                            }
-
-                                            //echo $TemplateText = "SELECT TemplateSMS FROM BULKSMSPanel.dbo.TemplateText ";
-                                            //exit;
-                                            $result_userDetail = odbc_exec($cn, $TemplateText);
-                                            while ($n = odbc_fetch_row($result_userDetail)) {
-                                                echo $TemplateSMS = odbc_result($result_userDetail, "TemplateSMS");
-                                                //$UserName = odbc_result($result_userDetail, "UserName");
-                                                echo "<option value='$TemplateSMS'>$TemplateSMS</option>";
+                                            // fetch template texts from panel DB
+                                            try {
+                                                if (isset($User) && $User == 'Admin') {
+                                                    $stmtTemp = $cn->query("SELECT TemplateSMS FROM dbo.TemplateText");
+                                                } else {
+                                                    $stmtTemp = $cn->prepare("SELECT TemplateSMS FROM dbo.TemplateText WHERE UserName = ?");
+                                                    $stmtTemp->execute([$User]);
+                                                }
+                                                $templates = $stmtTemp->fetchAll(PDO::FETCH_COLUMN, 0);
+                                                foreach ($templates as $t) {
+                                                    $tEsc = htmlspecialchars($t);
+                                                    echo "<option value='{$tEsc}'>{$tEsc}</option>";
+                                                }
+                                            } catch (PDOException $e) {
+                                                error_log("TemplateText fetch error: " . $e->getMessage());
                                             }
                                             ?>
                                         </select>
                                     </div>
                                 </div>
                             </div>
+
                             <div class="form-group">
                                 <label for="focusedinput" class="col-sm-3 control-label">Upload CSV File:</label>
                                 <div class="col-sm-6">
-
-                                    <input class="form-control" name="uploadcsv"  type="file" id="uploadcsv">
-
+                                    <input class="form-control" name="uploadcsv" type="file" id="uploadcsv" accept=".csv">
                                     Please download sample csv here . <a href="messaging/sample.csv">Download</a>
                                 </div>
-                            </div>           
+                            </div>
 
                             <div class="form-group">
                                 <label for="focusedinput" class="col-sm-3 control-label"></label>
@@ -163,11 +167,9 @@ $result_userDetail = odbc_exec($cn, $userDetail);
 
                     <script language="JavaScript" src="js/validator.js" type="text/javascript"></script>
                     <script language="JavaScript" src="js/jquery_004.js" type="text/javascript"></script>
-                   
-                   
+
                     <script>
                         $(document).ready(function () {
-
                             $('#recipient .count_me').textareaCount({
                                 'maxCharacterSize': 235,
                                 'textAlign': 'right',
@@ -231,9 +233,9 @@ $result_userDetail = odbc_exec($cn, $userDetail);
                                 $('#recipient .NumberOfSms').val(parts);
 
                             });
-                            <!-- End Recipient-->
+                            // End Recipient
 
-                            <!-- Sart Group SMS-->
+                            // Sart Group SMS
 
                             $('#group .count_me').textareaCount({
                                 'maxCharacterSize': 235,
@@ -286,9 +288,9 @@ $result_userDetail = odbc_exec($cn, $userDetail);
 
                                 $('#group .parts-count').text('| ' + parts + ' SMS (' + charPerSMS + ' Char./SMS)');
                             });
-                            <!-- End Group SMS-->
+                            // End Group SMS
 
-                            <!-- Sart Upload SMS-->
+                            // Sart Upload SMS
 
                             $('#upload .count_me').textareaCount({
                                 'maxCharacterSize': 235,
@@ -345,7 +347,7 @@ $result_userDetail = odbc_exec($cn, $userDetail);
                                 $('#upload .parts-count').text('| ' + parts + ' SMS (' + charPerSMS + ' Char./SMS)');
                             });
 
-                            <!-- End Upload SMS-->
+                            // End Upload SMS
                             function isDoubleByte(str) {
                                 for (var i = 0, n = str.length; i < n; i++) {
                                     //if (str.charCodeAt( i ) > 255 && str.charCodeAt( i )!== 8364 )
@@ -374,10 +376,7 @@ $result_userDetail = odbc_exec($cn, $userDetail);
                             }
 
                         });
-
                     </script>
-                   
-                   
                    
                     <script type="text/javascript">
                         $(function () {
@@ -392,7 +391,6 @@ $result_userDetail = odbc_exec($cn, $userDetail);
                     </script>
 
                     <script language="JavaScript" type="text/javascript">
-
                         $('#chkPassport').change(function () {
                             if ($(this).is(":checked"))
                                 $('#autoUpdate').fadeOut('slow');
@@ -400,12 +398,9 @@ $result_userDetail = odbc_exec($cn, $userDetail);
                                 $('#autoUpdate').fadeIn('slow');
 
                         });
-
                     </script>
 
                     <script language="JavaScript" type="text/javascript">
-
-
                         var frmvalidator = new Validator("SchedulePromotionID");
                         frmvalidator.addValidation("opt", "dontselect=0", "Please Select the User Name.");
                         // frmvalidator.addValidation("ShortCodeID", "dontselect=0", "Please Select the Short Code.");
@@ -415,187 +410,219 @@ $result_userDetail = odbc_exec($cn, $userDetail);
                         frmvalidator.addValidation("MinID", "req", "Write the Min.");
                         frmvalidator.addValidation("message", "req", "SMS Text Can not be null.");
                     </script>
+
                     <?php
-                    if ($_REQUEST['submit'] == "send") {
-                     
-                        $SendFrom = $_REQUEST['ShortCodeNumber'];
-                        $UserName = $_REQUEST['opt'];
-                        $TemplateText = $_REQUEST['TemplateText'];
-                        $Msg = $_REQUEST['message'];
-                        $MsgCount = $_REQUEST['NumberOfSms'];
-                        if ($TemplateText != '') {
+                    // --- FORM SUBMIT PROCESSING ---
+                    if (isset($_REQUEST['submit']) && $_REQUEST['submit'] === 'send') {
+
+                        // Collect & sanitize inputs
+                        $SendFrom = isset($_REQUEST['ShortCodeNumber']) ? trim($_REQUEST['ShortCodeNumber']) : '';
+                        $UserName = isset($_REQUEST['opt']) ? trim($_REQUEST['opt']) : '';
+                        $TemplateText = isset($_REQUEST['TemplateText']) ? $_REQUEST['TemplateText'] : '';
+                        $Msg = isset($_REQUEST['message']) ? $_REQUEST['message'] : '';
+                        $MsgCount = isset($_REQUEST['NumberOfSms']) ? max(1, intval($_REQUEST['NumberOfSms'])) : 1;
+                        if (!empty($TemplateText)) {
                             $Msg = $TemplateText;
                         }
-                        $txtitemcode = $_POST['Recipients'];
-                        $date = date("Y-m-d");
-                        $_POST['date'] = $date;
 
-
-                        $filename = $_FILES['uploadcsv']['name'];
-                        $filename = str_replace(' ', '_', $filename);
-                        $filepath = "./CSV/";
-
-                        $tmp_name = $_FILES['uploadcsv']['tmp_name'];
-                        $ext = getFileextension($filename);
-                        $header = substr($filename, 0, -5) . date("YmdHis") . '.' . $ext;
-
-
-                        $filelink = "./CSV/" . $header;
-                        $p = "D:/wwwroot/bulksmswebpanel/CSV/" . $header; //localhost
-//$p= base_url()."CSV/".$header;		//server	
-
-                        if (move_uploaded_file($tmp_name, $filelink)) {
-
-                            //echo "test";
-
-                            $sql_UserAccountStatus = "select NumberOfSMS from BULKSMSPanel.[dbo].[CurrentStatus] where UserName='$UserName'";
-                            $result_UserAccountStatus = odbc_exec($cn, $sql_UserAccountStatus);
-                            $row_UserAccount = odbc_fetch_array($result_UserAccountStatus);
-                            $row_UserAccount = $row_UserAccount['NumberOfSMS'];
-
-                            $ScheduleTime = date('Y-m-d H:i:s');
-
-                            $ScheduleTime = $ScheduleTime . '.000';
-                            $handle = fopen($filelink, "r");
-                            fgetcsv($handle, 1000, ",");
-                            $c = 1;
-
-                            $data = array();
-                            $n = '\n';
-                            while (($result = fgetcsv($handle)) !== false) {
-                                if (!empty($result[0])) {
-                                    $c++;
-                                  //  continue;
-                                } //else {  $c++; }
-                            }
-                          
-                             $TotalMsgCount=$MsgCount*$c;
-                            
-                            if ($TotalMsgCount > $row_UserAccount) {
-                                $url = base_url() . "index.php?parent=CSVUpload";
-                                popup('Your credit limit is over. Please talk to Solvers Team to upgrade your credit limit. ', $url);
+                        // Ensure CSV folder exists
+                        $csvDir = __DIR__ . '/CSV/';
+                        if (!is_dir($csvDir)) {
+                            if (!mkdir($csvDir, 0775, true)) {
+                                echo "<script>alert('Server cannot create CSV directory.');</script>";
                                 exit;
-                            } else {
-                                $conn = PDOConnectDB();
-                                                          
-                                //echo $cn = ConnectDB();
-
-                                $Userinfotable = $UserName . 'info';
-                                $Usernumbertable = $UserName . 'number';
-
-                                $conn->beginTransaction();
-                                $sql = "CREATE TABLE #$Userinfotable(
-	
-                                [srcMN] [varchar](20) NULL,
-                                [msg] [nvarchar](1000) NULL,
-                                [writeTime] [datetime] NULL,
-                                [sentTime] [datetime] NULL,
-                                [msgStatus] [varchar](50) NULL,
-                                [retrycount] [int] NULL,
-                                [msgID] [uniqueidentifier] NULL,
-                                [srcTON] [int] NULL,
-                                [srcNPI] [int] NULL,
-                                [msgType] [varchar](50) NULL,
-                                [esm_Class] [int] NULL,
-                                [Data_Coding] [int] NULL,
-                                [smsPart] [int] NULL,
-                                [totalPart] [int] NULL,
-                                [refID] [bigint] NULL,
-                                [Schedule] [datetime] NULL,
-                                [srcAccount] [varchar](50) NULL,
-                                [destAccount] [varchar](50) NULL,
-                                [Remarks] [varchar](1000) NULL,
-                                [ContentSubCategoryID] [varchar](100) NULL,
-                                [ServiceID] [varchar](100) NULL,
-                                [LastRetryTime] [datetime] NULL,
-                                [Priority] [int] NULL,
-                                [IN_MSG_ID] [varchar](30) NULL	
-                            )
-                            Insert into [BULKSMSPanel].[dbo].[#$Userinfotable] 
-(srcMN, msg, writeTime, sentTime, msgStatus, retrycount, srcTON, srcNPI, msgType, esm_Class, Data_Coding, smsPart, totalPart, refID,Schedule,srcAccount, destAccount, Remarks,ContentSubCategoryID,ServiceID)
-VALUES('$SendFrom',N'" . $Msg . "', getdate(),'', 'QUE', '5', '1','1', 'TEXT', '64', '1', '1', '1', '','$ScheduleTime','$UserName', '$UserName', '','','' )
-                            CREATE TABLE #$Usernumbertable
-                            (
-                            MSISDN VARCHAR(40)
-                            )
-                            BULK INSERT #$Usernumbertable FROM '$p' WITH ( FIELDTERMINATOR = ',', ROWTERMINATOR = '$n' )
-                            INSERT [BULKSMSGateway_1_0].[dbo].[SMSOutbox]  (srcMN,dstMN, msg, writeTime, sentTime, msgStatus, retrycount, srcTON, srcNPI, msgType, esm_Class, Data_Coding, smsPart, totalPart, refID,Schedule,srcAccount, destAccount, Remarks,ContentSubCategoryID,ServiceID,IN_MSG_ID)
-Select srcMN,MSISDN, msg, writeTime, sentTime, msgStatus, retrycount, srcTON, srcNPI, msgType, esm_Class, Data_Coding, smsPart, totalPart, refID,Schedule,srcAccount, destAccount, Remarks,ContentSubCategoryID,ServiceID,IN_MSG_ID
- from [dbo].[#$Usernumbertable],[BULKSMSPanel].[dbo].[#$Userinfotable] ";
-//  odbc_exec($cn, $sql_createusertable);
-                                $stmt = $conn->query($sql);
-                                if ($stmt != NULL) {
-                                    $conn->commit();
-//                                    $sql_COMMITTRANSACTION = "COMMIT TRANSACTION";
-//                                    odbc_exec($cn, $sql_COMMITTRANSACTION);
-
-                                    $AccountValSql = "Select NumberOfSMS from [dbo].[CurrentStatus] WHERE UserName='$UserName' and IsActive=1";
-                                    $AccountValResult = odbc_exec($cn, $AccountValSql);
-                                    $AccountValue = odbc_fetch_array($AccountValResult);
-                                    $UserCurrentSmsVal = $AccountValue[NumberOfSMS];
-                                    $TotalNumberOfSmsVal = $UserCurrentSmsVal - $TotalMsgCount;
-                                  $UpdateMainAccountQuery = "UPDATE [dbo].[CurrentStatus] set NumberOfSMS = $TotalNumberOfSmsVal WHERE UserName='$UserName' and IsActive=1";
-                                    odbc_exec($cn, $UpdateMainAccountQuery);
-
-                                    if (($TotalNumberOfSmsVal == 100)||($TotalNumberOfSmsVal == 50)) {
-                                 //if ($TotalNumberOfSmsVal < 101) {
-
-                                        $SelectEmailSql = "Select Email from [dbo].[UserInfo] WHERE UserName='$UserName' ";
-                                        $SelectEmailResult = odbc_exec($cn, $SelectEmailSql);
-                                        $UserEmailValue = odbc_fetch_array($SelectEmailResult);
-                                        $UserEmail = $UserEmailValue[Email];
-
-
-                                        $file = file_get_contents("http://solversbd.com/email/PHPMailer/examples/test_smtp_basic_rem.php?email=$UserEmail&mgs=welcome", FILE_USE_INCLUDE_PATH);
-                                    }
-
-
-
-                                    $ExpenseValSql = "Select NumberOfSMS from [dbo].[ExpenceHistory] WHERE UserName='$UserName' and  Date= convert(date, getdate())	";
-
-                                    $ExpenseValResult = odbc_exec($cn, $ExpenseValSql);
-                                    $ExpenseValue = odbc_fetch_array($ExpenseValResult);
-                                    $UserCurrentExpenseSmsVal = $ExpenseValue[NumberOfSMS];
-                                    if ($UserCurrentExpenseSmsVal > 0) {
-                                        $TotalNumberOfExpenseSmsVal = $UserCurrentExpenseSmsVal + $TotalMsgCount;
-
-                                        $UpdateExpenseQuery = "UPDATE [dbo].[ExpenceHistory] set NumberOfSMS = $TotalNumberOfExpenseSmsVal WHERE UserName='$UserName' and Date= convert(date, getdate())";
-                                        odbc_exec($cn, $UpdateExpenseQuery);
-                                    } else {
-                                        $sql_insertExpenseHistory = "INSERT INTO [dbo].[ExpenceHistory] (UserName,[NumberOfSMS],[Date]) VALUES ('$UserName','$TotalMsgCount',convert(date, getdate()))";
-                                        odbc_exec($cn, $sql_insertExpenseHistory);
-                                    }
-
-
-
-                                    echo "<script>
-               alert('SMS Posted Successfully');
-        </script>";
-                                } else {
-                                    $conn->rollBack();
-//                                    $sql_ROLLBACKTRANSACTION = " ROLLBACK TRANSACTION";
-//                                    odbc_exec($cn, $sql_ROLLBACKTRANSACTION);
-                                    echo "<script>
-				alert('Your Data is not uploaded properly,please try again.');
-			    </script>";
-                                }
-
-
-                                $sql_droptable = "DROP Table #$Usernumbertable ";
-                                odbc_exec($cn, $sql_droptable);
-
-
-                                $sql_dropusertable = "DROP Table #$Userinfotable ";
-                                odbc_exec($cn, $sql_dropusertable);
-
-                                odbc_close($cn);
                             }
                         }
-                    }
+
+                        // Validate upload
+                        if (!isset($_FILES['uploadcsv']) || $_FILES['uploadcsv']['error'] !== UPLOAD_ERR_OK) {
+                            echo "<script>alert('No CSV uploaded or upload error.');</script>";
+                        } else {
+                            $uploadedName = $_FILES['uploadcsv']['name'];
+                            $tmp_name = $_FILES['uploadcsv']['tmp_name'];
+                            $safeName = preg_replace('/[^A-Za-z0-9\-_\.]/', '_', pathinfo($uploadedName, PATHINFO_FILENAME));
+                            $ext = pathinfo($uploadedName, PATHINFO_EXTENSION) ?: 'csv';
+                            $finalName = $safeName . '_' . date("YmdHis") . '.' . $ext;
+                            $filelink = $csvDir . $finalName;
+
+                            if (!move_uploaded_file($tmp_name, $filelink)) {
+                                echo "<script>alert('Failed to move uploaded file to CSV folder.');</script>";
+                            } else {
+                                // Count non-empty recipient rows (skip header)
+                                $handle = fopen($filelink, "r");
+                                if ($handle === false) {
+                                    echo "<script>alert('Cannot open uploaded CSV file.');</script>";
+                                } else {
+                                    // assume first row is header
+                                    fgetcsv($handle, 10000, ",");
+                                    $recipientCount = 0;
+                                    while (($row = fgetcsv($handle, 10000, ",")) !== false) {
+                                        if (isset($row[0]) && trim($row[0]) !== '') {
+                                            $recipientCount++;
+                                        }
+                                    }
+                                    fclose($handle);
+
+                                    if ($recipientCount <= 0) {
+                                        echo "<script>alert('CSV contains no recipient rows.');</script>";
+                                    } else {
+                                        $TotalMsgCount = $MsgCount * $recipientCount;
+
+                                        // Check credit from panel DB ($cn)
+                                        try {
+                                            $stmtCredit = $cn->prepare("SELECT NumberOfSMS FROM dbo.CurrentStatus WHERE UserName = ? AND IsActive = 1");
+                                            $stmtCredit->execute([$UserName]);
+                                            $row = $stmtCredit->fetch(PDO::FETCH_ASSOC);
+                                            $userCredits = ($row && isset($row['NumberOfSMS'])) ? intval($row['NumberOfSMS']) : 0;
+                                        } catch (PDOException $e) {
+                                            error_log("Credit check error: " . $e->getMessage());
+                                            $userCredits = 0;
+                                        }
+
+                                        if ($TotalMsgCount > $userCredits) {
+                                            $url = base_url() . "index.php?parent=CSVUpload";
+                                            popup('Your credit limit is over. Please talk to Solvers Team to upgrade your credit limit. ', $url);
+                                            exit;
+                                        }
+
+                                        // Prepare server path for BULK INSERT
+                                        $serverCsvPath = realpath($filelink);
+                                        if ($serverCsvPath === false) {
+                                            echo "<script>alert('Failed to resolve absolute path for CSV file.');</script>";
+                                        } else {
+                                            // For SQL string we escape single quotes and ensure backslashes are doubled
+                                            $serverCsvPathForSql = str_replace("'", "''", $serverCsvPath);
+                                            $serverCsvPathForSql = str_replace("\\", "\\\\", $serverCsvPathForSql);
+
+                                            // Begin transaction on gateway DB ($conn)
+                                            try {
+                                                $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+                                                $conn->beginTransaction();
+
+                                                // 1) Create temp #Userinfo
+                                                $conn->exec("
+                                                    CREATE TABLE #Userinfo (
+                                                        srcMN varchar(20) NULL,
+                                                        msg nvarchar(1000) NULL,
+                                                        writeTime datetime NULL,
+                                                        sentTime datetime NULL,
+                                                        msgStatus varchar(50) NULL,
+                                                        retrycount int NULL,
+                                                        srcTON int NULL,
+                                                        srcNPI int NULL,
+                                                        msgType varchar(50) NULL,
+                                                        esm_Class int NULL,
+                                                        Data_Coding int NULL,
+                                                        smsPart int NULL,
+                                                        totalPart int NULL,
+                                                        refID bigint NULL,
+                                                        Schedule datetime NULL,
+                                                        srcAccount varchar(50) NULL,
+                                                        destAccount varchar(50) NULL,
+                                                        Remarks varchar(1000) NULL,
+                                                        ContentSubCategoryID varchar(100) NULL,
+                                                        ServiceID varchar(100) NULL,
+                                                        IN_MSG_ID varchar(30) NULL
+                                                    );
+                                                ");
+
+                                                // 2) Insert info row
+                                                $safeSendFrom = substr($SendFrom, 0, 20);
+                                                $safeMsg = mb_substr($Msg, 0, 1000); // keep length reasonable
+                                                $safeSchedule = date('Y-m-d H:i:s') . '.000';
+                                                $safeUserName = substr($UserName, 0, 50);
+
+                                                // Escape single quotes for literal insertion (temp table insert)
+                                                $safeSendFromSql = str_replace("'", "''", $safeSendFrom);
+                                                $safeMsgSql = str_replace("'", "''", $safeMsg);
+                                                $safeScheduleSql = str_replace("'", "''", $safeSchedule);
+                                                $safeUserNameSql = str_replace("'", "''", $safeUserName);
+
+                                                $conn->exec("
+                                                    INSERT INTO #Userinfo
+                                                    (srcMN, msg, writeTime, sentTime, msgStatus, retrycount, srcTON, srcNPI, msgType, esm_Class, Data_Coding, smsPart, totalPart, refID, Schedule, srcAccount, destAccount, Remarks, ContentSubCategoryID, ServiceID)
+                                                    VALUES ('{$safeSendFromSql}', N'{$safeMsgSql}', GETDATE(), NULL, 'QUE', 5, 1, 1, 'TEXT', 64, 1, 1, 1, NULL, '{$safeScheduleSql}', '{$safeUserNameSql}', '{$safeUserNameSql}', NULL, NULL, NULL);
+                                                ");
+
+                                                // 3) Create temp #Usernumber
+                                                $conn->exec("CREATE TABLE #Usernumber (MSISDN varchar(40) NULL);");
+
+                                                // 4) BULK INSERT into #Usernumber (single exec) -- this runs on DB server
+                                                $bulkSql = "BULK INSERT #Usernumber FROM '{$serverCsvPathForSql}' WITH ( FIELDTERMINATOR = ',', ROWTERMINATOR = '\\n' );";
+                                                $conn->exec($bulkSql);
+
+                                                // 5) Insert into SMSOutbox from the temp tables
+                                                $conn->exec("
+                                                    INSERT INTO dbo.SMSOutbox
+                                                    (srcMN,dstMN,msg,writeTime,sentTime,msgStatus,retrycount,srcTON,srcNPI,msgType,esm_Class,Data_Coding,smsPart,totalPart,refID,Schedule,srcAccount,destAccount,Remarks,ContentSubCategoryID,ServiceID,IN_MSG_ID)
+                                                    SELECT i.srcMN, n.MSISDN, i.msg, i.writeTime, i.sentTime, i.msgStatus, i.retrycount, i.srcTON, i.srcNPI, i.msgType, i.esm_Class, i.Data_Coding, i.smsPart, i.totalPart, i.refID, i.Schedule, i.srcAccount, i.destAccount, i.Remarks, i.ContentSubCategoryID, i.ServiceID, i.IN_MSG_ID
+                                                    FROM #Usernumber n CROSS JOIN #Userinfo i;
+                                                ");
+
+                                                // 6) Drop temp tables
+                                                $conn->exec("DROP TABLE #Usernumber;");
+                                                $conn->exec("DROP TABLE #Userinfo;");
+
+                                                // Commit
+                                                $conn->commit();
+
+                                                // --- Update panel DB (credits & expense history) using $cn (panel DB) ---
+                                                // Deduct credits
+                                                $newCredits = $userCredits - $TotalMsgCount;
+                                                $stmtUpdate = $cn->prepare("UPDATE dbo.CurrentStatus SET NumberOfSMS = ? WHERE UserName = ? AND IsActive = 1");
+                                                $stmtUpdate->execute([$newCredits, $UserName]);
+
+                                                // Trigger low-balance email when 100 or 50 remain
+                                                if ($newCredits == 100 || $newCredits == 50) {
+                                                    try {
+                                                        $stmtEmail = $cn->prepare("SELECT Email FROM dbo.UserInfo WHERE UserName = ?");
+                                                        $stmtEmail->execute([$UserName]);
+                                                        $emailRow = $stmtEmail->fetch(PDO::FETCH_ASSOC);
+                                                        if ($emailRow && !empty($emailRow['Email'])) {
+                                                            $UserEmail = urlencode($emailRow['Email']);
+                                                            // Fire-and-forget email URL (as before)
+                                                            @file_get_contents("http://solversbd.com/email/PHPMailer/examples/test_smtp_basic_rem.php?email={$UserEmail}&mgs=welcome");
+                                                        }
+                                                    } catch (Exception $e) {
+                                                        error_log("Low-balance email error: " . $e->getMessage());
+                                                    }
+                                                }
+
+                                                // Update expense history
+                                                try {
+                                                    $stmtExp = $cn->prepare("SELECT NumberOfSMS FROM dbo.ExpenceHistory WHERE UserName = ? AND Date = CONVERT(date, GETDATE())");
+                                                    $stmtExp->execute([$UserName]);
+                                                    $expRow = $stmtExp->fetch(PDO::FETCH_ASSOC);
+                                                    if ($expRow && isset($expRow['NumberOfSMS'])) {
+                                                        $updated = intval($expRow['NumberOfSMS']) + $TotalMsgCount;
+                                                        $stmtUpdExp = $cn->prepare("UPDATE dbo.ExpenceHistory SET NumberOfSMS = ? WHERE UserName = ? AND Date = CONVERT(date, GETDATE())");
+                                                        $stmtUpdExp->execute([$updated, $UserName]);
+                                                    } else {
+                                                        $stmtInsExp = $cn->prepare("INSERT INTO dbo.ExpenceHistory (UserName, NumberOfSMS, Date) VALUES (?, ?, CONVERT(date, GETDATE()))");
+                                                        $stmtInsExp->execute([$UserName, $TotalMsgCount]);
+                                                    }
+                                                } catch (Exception $e) {
+                                                    error_log("ExpenseHistory update error: " . $e->getMessage());
+                                                }
+
+                                                echo "<script>alert('SMS Posted Successfully');</script>";
+
+                                            } catch (PDOException $e) {
+                                                if ($conn->inTransaction()) {
+                                                    $conn->rollBack();
+                                                }
+                                                error_log("BULK/Temp error (PDO): " . $e->getMessage());
+                                                echo "<script>alert('An error occurred while inserting to database. Check server logs.');</script>";
+                                            }
+                                        } // realpath ok
+                                    } // recipients > 0
+                                } // fopen ok
+                            } // moved file
+                        } // upload exists
+                    } // form submit
                     ?>
                 </div>
             </div>
         </div>
     </div> <!-- row -->
 </div> <!-- container -->
-

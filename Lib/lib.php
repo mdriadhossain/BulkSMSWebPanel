@@ -6,7 +6,7 @@ function IsDNDNumber($MSISDN, $cn) {
 
     $MSISDN = substr($MSISDN, -10);
     //$IsUserExistQuery="select count(MSISDN) as count from [CMS_1_0].dbo.DNDList where MSISDN='$MSISDN' and Operator='$Operator'";
-    $IsUserExistQuery = "select count(ID) as count from [CMS_1_0].dbo.DNDList where '$MSISDN' between FromMSISDN and ToMSISDN";
+    $IsUserExistQuery = "select count(ID) as count from dbo.DNDList where '$MSISDN' between FromMSISDN and ToMSISDN";
 
     // echo $IsUserExistQuery."<br/>";
 

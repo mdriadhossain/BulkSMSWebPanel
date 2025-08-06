@@ -197,7 +197,7 @@ $cn = ConnectDB();
                                 </thead>
                                 <tbody>
                                     <?PHP
-                                    $OperatorQuery = "select distinct(ShortCode) as ShortCode  from CMS_1_0.dbo.Keyword where Operator='$operator'";
+                                    $OperatorQuery = "select distinct(ShortCode) as ShortCode  from dbo.Keyword where Operator='$operator'";
                                     if ($rs = odbc_exec($cn, $OperatorQuery)) {
                                         $NumberOfShortcode = odbc_num_rows($rs) + 1;
                                         //echo '<tr>';

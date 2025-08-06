@@ -7,7 +7,7 @@
 // ini_set('display_errors', 1);
 // error_reporting(E_ALL);
 
-$userDetail = "SELECT UserID, UserName FROM CMS_1_0.dbo.UserInfo  Order By UserName ASC";
+$userDetail = "SELECT UserID, UserName FROM dbo.UserInfo  Order By UserName ASC";
 $result_userDetail = odbc_exec($cn, $userDetail);
 ?>
 
@@ -190,7 +190,7 @@ $result_userDetail = odbc_exec($cn, $userDetail);
                                         $SendTo = "880" . $InitialMSISDN;
                                         $MobileNumber = $SendTo;
                                         // $msg = str_replace("'", "''", $data[3]);
-                                        $qry = "insert into [CMS_1_0].dbo.PromoList([MSISDN],[UserName],[PromoListName],[UpdateDate],[UpdateBy])
+                                        $qry = "insert into dbo.PromoList([MSISDN],[UserName],[PromoListName],[UpdateDate],[UpdateBy])
 	                                            values('$MobileNumber','$UName','$PromoName',getdate(),'$User')";
 
                                         //echo $qry."<br/>";
@@ -246,7 +246,7 @@ $result_userDetail = odbc_exec($cn, $userDetail);
                     {
                         $existUser = 0;
                         $isexistUser = "SELECT COUNT(*) AS count 
-                    FROM [CMS_1_0].dbo.PromoList 
+                    FROM dbo.PromoList 
                     WHERE PromoListName = '$UserName' 
                     AND UserName = '$Operator'";
 

@@ -50,7 +50,7 @@ $cn = ConnectDB();
                                         <option value=''>Select ShortCode</option>
                                         <?php
                                         $cn = ConnectDB();
-                                        $ScodeQuery = "select distinct(ShortCode) as ShortCode  from CMS_1_0.dbo.Keyword order by ShortCode asc";
+                                        $ScodeQuery = "select distinct(ShortCode) as ShortCode  from dbo.Keyword order by ShortCode asc";
                                         $rs = odbc_exec($cn, $ScodeQuery);
                                         while ($row = odbc_fetch_array($rs)) {
                                             echo "<option value=\"" . $row[ShortCode] . "\">" . $row[ShortCode] . "</option>";

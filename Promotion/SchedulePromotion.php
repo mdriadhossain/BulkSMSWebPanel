@@ -1,26 +1,15 @@
 <?php
 
-// ini_set('display_errors', 1);
-// ini_set('display_startup_errors', 1);
-// error_reporting(E_ALL);
-
-$logFile = __DIR__ . '/debug_sms.log';
-
-// Log script start immediately
-file_put_contents($logFile, "=== Script started at " . date('Y-m-d H:i:s') . " ===\n", FILE_APPEND);
+// Function to detect if the SMS message contains Unicode/Bengali characters
+function isUnicodeSMS($text)
+{
+    return preg_match('/[^\x00-\x7F]/', $text);
+}
 
 // Check if the log file is writable
 if (!is_writable($logFile)) {
     error_log("DEBUG LOG FILE IS NOT WRITABLE: $logFile");
 }
-
-// You can even test writing a quick log here:
-file_put_contents($logFile, "Test log entry after writable check\n", FILE_APPEND);
-
-// --- PHP Section ---
-// Purpose: Setup user list, handle form submission, process scheduled SMS insertion
-
-// Assumes $cn (ODBC connection) and $User (current username) are already set in session/context
 
 // Fetch users for dropdown (exclude admin)
 $userDetail = "SELECT UserID, UserName FROM BULKSMSPanel.dbo.UserInfo WHERE UserName <> 'admin'";
@@ -68,210 +57,141 @@ $currentMin = date("i");
 
 // Handle form submission for scheduling SMS
 if (isset($_REQUEST['Save']) && $_REQUEST['Save'] === 'Save') {
+    // Start transaction
+    odbc_exec($cn, "BEGIN TRANSACTION");
 
-    file_put_contents($logFile, "[FORM SUBMISSION] Received at " . date('Y-m-d H:i:s') . "\n", FILE_APPEND);
+    try {
+        // Collect inputs
+        $Uname = $_REQUEST['opt'];
+        $SendFrom = $_REQUEST['ShortCodeNumber'] ?? '';
+        $PromoName = $_REQUEST['PromoListName'];
+        $ServiceID = "promo_" . $PromoName . "_" . $SendFrom;
+        $stDate = $_REQUEST['start_date'];
+        $Hour = $_REQUEST['Hour'];
+        $Min = $_REQUEST['Min'];
+        $ScheduleTime = date('Y-m-d H:i:s', strtotime("$stDate $Hour:$Min:00"));
 
-    // Log all incoming form data keys and values (be cautious with passwords!)
-    foreach ($_REQUEST as $key => $value) {
-        file_put_contents($logFile, "FormData - $key: " . (is_string($value) ? substr($value, 0, 100) : 'Non-string value') . "\n", FILE_APPEND);
-    }
+        $TemplateText = $_REQUEST['TemplateText'];
+        $Msg = $_REQUEST['SMSText'];
+        if ($TemplateText != '') $Msg = $TemplateText;
 
-    // Collect inputs from form
-    $Uname = $_REQUEST['opt'];
-    $SendFrom = $_REQUEST['ShortCodeNumber'] ?? '';
-    $PromoName = $_REQUEST['PromoListName'];
-    $ServiceID = "promo_" . $PromoName . "_" . $SendFrom;
-    $stDate = $_REQUEST['start_date'];
-    $Hour = $_REQUEST['Hour'];
-    $Min = $_REQUEST['Min'];
+        $User = strtoupper($_SESSION['User']);
 
-    // $ScheduleTime = $stDate . " " . $Hour . ":" . $Min . ":000";
-    $ScheduleTime = date('Y-m-d H:i:s', strtotime("$start_date $Hour:$Min:00"));
+        // Fetch Requesting IP
+        $sql_requestingip = "SELECT RequestingIP FROM BULKSMSPanel.dbo.MaskingDetail WHERE MaskingID = ?";
+        $stmt_requestingip = odbc_prepare($cn, $sql_requestingip);
+        odbc_execute($stmt_requestingip, [$SendFrom]);
+        $row = odbc_fetch_array($stmt_requestingip);
+        $RequestedIP = $row['RequestingIP'] ?? '';
 
+        // Fetch user credentials
+        $sql_userInfo = "SELECT UserName, Password FROM BULKSMSPanel.dbo.UserInfo WHERE UserName = ?";
+        $stmt_userInfo = odbc_prepare($cn, $sql_userInfo);
+        odbc_execute($stmt_userInfo, [$Uname]);
+        $row = odbc_fetch_array($stmt_userInfo);
+        $UserName = $row['UserName'] ?? '';
+        $Password = $row['Password'] ?? '';
 
-    $TemplateText = $_REQUEST['TemplateText'];
-    $Msg = $_REQUEST['SMSText'];
-
-    file_put_contents($logFile, "[INFO] User: $Uname, SendFrom: $SendFrom, PromoName: $PromoName, ScheduleTime: $ScheduleTime\n", FILE_APPEND);
-
-    // If a template text is selected, override $Msg
-    if ($TemplateText != '') {
-        $Msg = $TemplateText;
-    }
-
-    // Detect Unicode characters (Bangla) and convert to UCS-2 HEX
-    function unicodeToHex($str)
-    {
-        $hex = '';
-        for ($i = 0; $i < mb_strlen($str, 'UTF-8'); $i++) {
-            $char = mb_substr($str, $i, 1, 'UTF-8');
-            $hex .= strtoupper(bin2hex(mb_convert_encoding($char, 'UCS-2BE', 'UTF-8')));
+        // Fetch all numbers
+        $ScheduleNumbers = [];
+        $sql_schedulednumber = "SELECT MSISDN FROM BULKSMSPanel.dbo.PromoList WHERE PromoListName = ?";
+        $stmt_schedulednumber = odbc_prepare($cn, $sql_schedulednumber);
+        odbc_execute($stmt_schedulednumber, [$PromoName]);
+        while ($row = odbc_fetch_array($stmt_schedulednumber)) {
+            $ScheduleNumbers[] = $row['MSISDN'];
         }
-        return $hex;
-    }
 
-    if (preg_match('/[^\x00-\x7F]/', $Msg)) {
-        // Message contains non-ASCII characters, convert
-        $Msg = unicodeToHex($Msg);
-    }
+        // Check if list is empty
+        if (empty($ScheduleNumbers)) {
+            popup('No numbers found in the selected list.', base_url() . "index.php?parent=SchedulePromotion");
+            exit;
+        }
 
-    // Get user from session and upper-case
-    $User = strtoupper($_SESSION['User']);
+        // Insert promotional detail
+        $PromoDetail = "INSERT INTO BULKSMSPanel.dbo.PromotionalDetail (PromoName, PromoText, PromoID, SendingTime, SendBy)
+                        VALUES (?, ?, ?, ?, ?)";
+        $stmtPromoDetail = odbc_prepare($cn, $PromoDetail);
+        odbc_execute($stmtPromoDetail, [$PromoName, $Msg, $ServiceID, $ScheduleTime, $User]);
 
-    // Fetch Requesting IP for the masking ID
-    $sql_requestingip = "SELECT RequestingIP FROM BULKSMSPanel.dbo.MaskingDetail WHERE MaskingID = ?";
-    $stmt_requestingip = odbc_prepare($cn, $sql_requestingip);
-    odbc_execute($stmt_requestingip, [$SendFrom]);
-    $row = odbc_fetch_array($stmt_requestingip);
-    $RequestedIP = $row['RequestingIP'] ?? '';
+        // Check user credit
+        $sql_UserAccountStatus = "SELECT NumberOfSMS FROM BULKSMSPanel.dbo.CurrentStatus WHERE UserName = ?";
+        $stmt_UserAccountStatus = odbc_prepare($cn, $sql_UserAccountStatus);
+        odbc_execute($stmt_UserAccountStatus, [$Uname]);
+        $row_UserAccount = odbc_fetch_array($stmt_UserAccountStatus);
+        $userCreditBalance = intval($row_UserAccount['NumberOfSMS'] ?? 0);
 
-    // Fetch User credentials for API authentication
-    $sql_userInfo = "SELECT UserName, Password FROM BULKSMSPanel.dbo.UserInfo WHERE UserName = ?";
-    $stmt_userInfo = odbc_prepare($cn, $sql_userInfo);
-    odbc_execute($stmt_userInfo, [$Uname]);
-    $row = odbc_fetch_array($stmt_userInfo);
-    $UserName = $row['UserName'] ?? '';
-    $Password = $row['Password'] ?? '';
+        if (count($ScheduleNumbers) > $userCreditBalance) {
+            popup('Your credit limit is over. Please talk to Solvers Team to upgrade your credit limit.', base_url() . "index.php?parent=SchedulePromotion");
+            exit;
+        }
 
-    // After fetching User credentials:
-    file_put_contents($logFile, "[INFO] UserName fetched: $UserName, Password fetched: " . ($Password ? '*****' : 'EMPTY') . "\n", FILE_APPEND);
+        // Process each MSISDN
+        foreach ($ScheduleNumbers as $SendTo) {
+            if (strlen($SendTo) > 10 && is_numeric($SendTo)) {
+                $SendTo = "880" . substr($SendTo, -10);
+                $InMSgID = $SendTo . date('YmdHis') . rand(1, 99);
+                $isUnicode = preg_match('/[^\x00-\x7F]/', $Msg);
 
-    $AuthToken = base64_encode($UserName . "|" . $Password);
+                $MsgCount = $isUnicode ? ceil(mb_strlen($Msg, 'UTF-8') / 67) : ceil(strlen($Msg) / 153);
 
-    // Fetch all MSISDN numbers from the selected promotional list
-    $ScheduleNumbers = [];
-    $sql_schedulednumber = "SELECT MSISDN FROM BULKSMSPanel.dbo.PromoList WHERE PromoListName = ?";
-    $stmt_schedulednumber = odbc_prepare($cn, $sql_schedulednumber);
-    odbc_execute($stmt_schedulednumber, [$PromoName]);
-    while ($row = odbc_fetch_array($stmt_schedulednumber)) {
-        $ScheduleNumbers[] = $row['MSISDN'];
-    }
-    $dataexplodecount = count($ScheduleNumbers);
+                // Choose stored procedure
+                $spName = $isUnicode ? "[BULKSMSPanel].[dbo].[PermitSMSProcBangla]" : "[BULKSMSPanel].[dbo].[PermitSMSProc]";
 
-    // After fetching MSISDN list count:
-    file_put_contents($logFile, "[INFO] Number of MSISDNs to send: $dataexplodecount\n", FILE_APPEND);
+                $SMSPermitQuery = "DECLARE @returnValue INT;
+                                   EXEC @returnValue=$spName
+                                   @UserName = ?, 
+                                   @Password = ?, 
+                                   @RequestedIP = ?, 
+                                   @SendFrom = ?, 
+                                   @SendTo = ?, 
+                                   @InMSgID = ?, 
+                                   @ScheduleTime = ?, 
+                                   @NumberOfPerSMS = ?, 
+                                   @msg = ?;
+                                   SELECT @returnValue as ReturnVal;";
 
-    // Insert promotional detail record
-    $PromoDetail = "INSERT INTO BULKSMSPanel.dbo.PromotionalDetail (PromoName, PromoText, PromoID, SendingTime, SendBy)
-                    VALUES (?, ?, ?, ?, ?)";
-    $stmtPromoDetail = odbc_prepare($cn, $PromoDetail);
-    odbc_execute($stmtPromoDetail, [$PromoName, $Msg, $ServiceID, $ScheduleTime, $User]);
+                $stmtPermit = odbc_prepare($cn, $SMSPermitQuery);
+                odbc_execute($stmtPermit, [$UserName, $Password, $RequestedIP, $SendFrom, $SendTo, $InMSgID, $ScheduleTime, $MsgCount, $Msg]);
 
-    // Check user's SMS credit balance
-    $sql_UserAccountStatus = "SELECT NumberOfSMS FROM BULKSMSPanel.dbo.CurrentStatus WHERE UserName = ?";
-    $stmt_UserAccountStatus = odbc_prepare($cn, $sql_UserAccountStatus);
-    odbc_execute($stmt_UserAccountStatus, [$Uname]);
-    $row_UserAccount = odbc_fetch_array($stmt_UserAccountStatus);
-    $userCreditBalance = intval($row_UserAccount['NumberOfSMS'] ?? 0);
+                $PermitReturnValArray = odbc_fetch_array($stmtPermit);
+                $PermitReturnVal = $PermitReturnValArray['ReturnVal'];
 
-    if ($dataexplodecount > $userCreditBalance) {
-        $url = base_url() . "index.php?parent=SchedulePromotion";
-        popup('Your credit limit is over. Please talk to Solvers Team to upgrade your credit limit.', $url);
-        exit;
-    }
+                if ($PermitReturnVal != '200') {
+                    // Log error (same as your current code)
+                    $StatusCode = $PermitReturnVal;
+                    $sql_error = "SELECT ErrorCode, ErrorDescription, ActionTaken FROM BULKSMSPanel.dbo.ErrorCode WHERE ErrorCode = ?";
+                    $stmt_error = odbc_prepare($cn, $sql_error);
+                    odbc_execute($stmt_error, [$StatusCode]);
+                    $row_error = odbc_fetch_array($stmt_error);
+                    $ErrorDescription = $row_error['ErrorDescription'] ?? 'Unknown error';
 
-    // Counters for valid and invalid numbers
-    $ValidNumCounter = 0;
-    $InValidNumCounter = 0;
-    $InValidMsisdn = 0;
-
-    // Process each MSISDN and schedule SMS using stored procedure
-    foreach ($ScheduleNumbers as $SendTo) {
-
-        file_put_contents($logFile, "[PROCESSING MSISDN] $SendTo\n", FILE_APPEND);
-
-        $MSISDNLength = strlen($SendTo);
-        if ($MSISDNLength > 10 && is_numeric($SendTo)) {
-            $InitialMSISDN = substr($SendTo, -10);
-            $SendTo = "880" . $InitialMSISDN;
-            $MSISDN = $SendTo;
-            $InMSgID = $MSISDN . date('YmdHis') . rand(1, 99);
-
-            file_put_contents($logFile, "[CALL STORED PROCEDURE] MSISDN: $SendTo, MsgID: $InMSgID\n", FILE_APPEND);
-
-            // Log parameters before sending SMS
-            file_put_contents($logFile, "Sending SMS to: $SendTo\nMessage: $Msg\nScheduleTime: $ScheduleTime\nSendFrom: $SendFrom\nUserName: $UserName\n", FILE_APPEND);
-
-            $SMSPermitQuery = 'DECLARE @returnValue INT;';
-            $SMSPermitQuery .= 'EXEC @returnValue=[BULKSMSPanel].[dbo].[PermitSMSProc]';
-            $SMSPermitQuery .= "@UserName ='$UserName',";
-            $SMSPermitQuery .= "@Password ='$Password',";
-            $SMSPermitQuery .= "@RequestedIP='$RequestedIP',";
-            $SMSPermitQuery .= "@SendFrom ='$SendFrom',";
-            $SMSPermitQuery .= "@SendTo ='$SendTo',";
-            $SMSPermitQuery .= "@InMSgID ='$InMSgID',";
-            $SMSPermitQuery .= "@ScheduleTime ='$ScheduleTime',";
-            $SMSPermitQuery .= "@msg ='$Msg';";
-            $SMSPermitQuery .= "select @returnValue as ReturnVal; ";
-            $result = odbc_exec($cn, $SMSPermitQuery);
-            $PermitReturnValArray = odbc_fetch_array($result);
-            $PermitReturnVal = $PermitReturnValArray['ReturnVal'];
-
-            // Fetch return value from SELECT
-            $returnVal = null;
-            if ($ok && ($row = odbc_fetch_array($stmtPermitSMS))) {
-                $returnVal = $row['ReturnVal'];
-            }
-
-            // Log execution results
-            file_put_contents(
-                __DIR__ . '/debug_sms.log',
-                "[PROC EXECUTION] " . ($ok ? "Success" : "Failed") . PHP_EOL .
-                    "[PROC RETURN] ReturnVal: " . var_export($returnVal, true) . PHP_EOL,
-                FILE_APPEND
-            );
-            // --- END PermitSMSProc call (REPLACEMENT) ---
-
-            if ($PermitReturnVal == '200') {
-
-                file_put_contents($logFile, "[SUCCESS] MSISDN $SendTo accepted with ReturnVal: $PermitReturnVal\n", FILE_APPEND);
-
-                $ValidNumCounter++;
+                    $sql_error_insert = "INSERT INTO BULKSMSGateway_1_0.dbo.ErrorNumbers (MobileNo, ErrorCode, ErrorDescription, UserName)
+                                         VALUES (?, ?, ?, ?)";
+                    $stmt_error_insert = odbc_prepare($cn, $sql_error_insert);
+                    odbc_execute($stmt_error_insert, [$SendTo, $StatusCode, $ErrorDescription, $UserName]);
+                }
             } else {
-
-                file_put_contents($logFile, "[ERROR] MSISDN $SendTo failed with error code: $PermitReturnVal\n", FILE_APPEND);
-
-                // Log error codes for invalid messages
-                $StatusCode = $PermitReturnVal;
-                $sql_error = "SELECT ErrorCode, ErrorDescription, ActionTaken FROM BULKSMSPanel.dbo.ErrorCode WHERE ErrorCode = ?";
-                $stmt_error = odbc_prepare($cn, $sql_error);
-                odbc_execute($stmt_error, [$StatusCode]);
-                $row_error = odbc_fetch_array($stmt_error);
-                $ErrorDescription = $row_error['ErrorDescription'] ?? 'Unknown error';
-
+                // Invalid MSISDN
                 $sql_error_insert = "INSERT INTO BULKSMSGateway_1_0.dbo.ErrorNumbers (MobileNo, ErrorCode, ErrorDescription, UserName)
-                                     VALUES (?, ?, ?, ?)";
+                                     VALUES (?, '204', 'Invalid Recipient MSISDN number', ?)";
                 $stmt_error_insert = odbc_prepare($cn, $sql_error_insert);
-                odbc_execute($stmt_error_insert, [$SendTo, $StatusCode, $ErrorDescription, $UserName]);
-
-                $InValidNumCounter++;
+                odbc_execute($stmt_error_insert, [$SendTo, $UserName]);
             }
-        } else {
-            // Invalid MSISDN format
-            $sql_error_insert = "INSERT INTO BULKSMSGateway_1_0.dbo.ErrorNumbers (MobileNo, ErrorCode, ErrorDescription, UserName)
-                                 VALUES (?, '204', 'Invalid Recipient MSISDN number', ?)";
-            $stmt_error_insert = odbc_prepare($cn, $sql_error_insert);
-            odbc_execute($stmt_error_insert, [$SendTo, $UserName]);
-            $InValidMsisdn++;
         }
+
+        // Commit transaction
+        odbc_exec($cn, "COMMIT TRANSACTION");
+        popup('Schedule Created Successfully.', base_url() . "index.php?parent=SchedulePromotion");
+
+    } catch (Exception $e) {
+        // Rollback on error
+        odbc_exec($cn, "ROLLBACK TRANSACTION");
+        error_log("Error in scheduling SMS: " . $e->getMessage());
+        popup('An error occurred while scheduling. Please try again.', base_url() . "index.php?parent=SchedulePromotion");
     }
-
-    $url = base_url() . "index.php?parent=SchedulePromotion";
-    popup('Schedule Created Successfully.', $url);
-
-    file_put_contents($logFile, "[FORM SUBMISSION END] Completed processing at " . date('Y-m-d H:i:s') . "\n\n", FILE_APPEND);
 }
 
 ?>
-
-<!--
-===================================================================
-HTML Section
-Purpose: Display the Schedule Messaging form with user dropdown,
-masking ID, promotional list, date and time pickers, message input,
-and template text selection.
-===================================================================
--->
 
 <div id="page-content">
     <div id="wrap">
@@ -423,15 +343,8 @@ and template text selection.
             </div>
         </div>
     </div>
-</div> <!-- container -->
+</div>
 
-<!--
-===================================================================
-JavaScript Section
-Purpose: Handle UI interactions, text counting, unicode detection,
-template toggle, datepicker initialization, and form validation
-===================================================================
--->
 <script src="bootstrap-select/dist/js/bootstrap-select.js"></script>
 <link rel="stylesheet" href="bootstrap-select/dist/css/bootstrap-select.css">
 

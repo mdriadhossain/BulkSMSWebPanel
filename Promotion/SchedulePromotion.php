@@ -99,6 +99,22 @@ if (isset($_REQUEST['Save']) && $_REQUEST['Save'] === 'Save') {
         $Msg = $TemplateText;
     }
 
+    // Detect Unicode characters (Bangla) and convert to UCS-2 HEX
+    function unicodeToHex($str)
+    {
+        $hex = '';
+        for ($i = 0; $i < mb_strlen($str, 'UTF-8'); $i++) {
+            $char = mb_substr($str, $i, 1, 'UTF-8');
+            $hex .= strtoupper(bin2hex(mb_convert_encoding($char, 'UCS-2BE', 'UTF-8')));
+        }
+        return $hex;
+    }
+
+    if (preg_match('/[^\x00-\x7F]/', $Msg)) {
+        // Message contains non-ASCII characters, convert
+        $Msg = unicodeToHex($Msg);
+    }
+
     // Get user from session and upper-case
     $User = strtoupper($_SESSION['User']);
 

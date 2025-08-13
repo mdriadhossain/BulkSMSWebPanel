@@ -1,4 +1,22 @@
 <?php
+
+// ini_set('display_errors', 1);
+// ini_set('display_startup_errors', 1);
+// error_reporting(E_ALL);
+
+$logFile = __DIR__ . '/debug_sms.log';
+
+// Log script start immediately
+file_put_contents($logFile, "=== Script started at " . date('Y-m-d H:i:s') . " ===\n", FILE_APPEND);
+
+// Check if the log file is writable
+if (!is_writable($logFile)) {
+    error_log("DEBUG LOG FILE IS NOT WRITABLE: $logFile");
+}
+
+// You can even test writing a quick log here:
+file_put_contents($logFile, "Test log entry after writable check\n", FILE_APPEND);
+
 // --- PHP Section ---
 // Purpose: Setup user list, handle form submission, process scheduled SMS insertion
 
@@ -50,6 +68,14 @@ $currentMin = date("i");
 
 // Handle form submission for scheduling SMS
 if (isset($_REQUEST['Save']) && $_REQUEST['Save'] === 'Save') {
+
+    file_put_contents($logFile, "[FORM SUBMISSION] Received at " . date('Y-m-d H:i:s') . "\n", FILE_APPEND);
+
+    // Log all incoming form data keys and values (be cautious with passwords!)
+    foreach ($_REQUEST as $key => $value) {
+        file_put_contents($logFile, "FormData - $key: " . (is_string($value) ? substr($value, 0, 100) : 'Non-string value') . "\n", FILE_APPEND);
+    }
+
     // Collect inputs from form
     $Uname = $_REQUEST['opt'];
     $SendFrom = $_REQUEST['ShortCodeNumber'] ?? '';
@@ -58,9 +84,15 @@ if (isset($_REQUEST['Save']) && $_REQUEST['Save'] === 'Save') {
     $stDate = $_REQUEST['start_date'];
     $Hour = $_REQUEST['Hour'];
     $Min = $_REQUEST['Min'];
-    $ScheduleTime = $stDate . " " . $Hour . ":" . $Min . ":000";
+
+    // $ScheduleTime = $stDate . " " . $Hour . ":" . $Min . ":000";
+    $ScheduleTime = date('Y-m-d H:i:s', strtotime("$start_date $Hour:$Min:00"));
+
+
     $TemplateText = $_REQUEST['TemplateText'];
     $Msg = $_REQUEST['SMSText'];
+
+    file_put_contents($logFile, "[INFO] User: $Uname, SendFrom: $SendFrom, PromoName: $PromoName, ScheduleTime: $ScheduleTime\n", FILE_APPEND);
 
     // If a template text is selected, override $Msg
     if ($TemplateText != '') {
@@ -85,6 +117,9 @@ if (isset($_REQUEST['Save']) && $_REQUEST['Save'] === 'Save') {
     $UserName = $row['UserName'] ?? '';
     $Password = $row['Password'] ?? '';
 
+    // After fetching User credentials:
+    file_put_contents($logFile, "[INFO] UserName fetched: $UserName, Password fetched: " . ($Password ? '*****' : 'EMPTY') . "\n", FILE_APPEND);
+
     $AuthToken = base64_encode($UserName . "|" . $Password);
 
     // Fetch all MSISDN numbers from the selected promotional list
@@ -96,6 +131,9 @@ if (isset($_REQUEST['Save']) && $_REQUEST['Save'] === 'Save') {
         $ScheduleNumbers[] = $row['MSISDN'];
     }
     $dataexplodecount = count($ScheduleNumbers);
+
+    // After fetching MSISDN list count:
+    file_put_contents($logFile, "[INFO] Number of MSISDNs to send: $dataexplodecount\n", FILE_APPEND);
 
     // Insert promotional detail record
     $PromoDetail = "INSERT INTO BULKSMSPanel.dbo.PromotionalDetail (PromoName, PromoText, PromoID, SendingTime, SendBy)
@@ -123,6 +161,9 @@ if (isset($_REQUEST['Save']) && $_REQUEST['Save'] === 'Save') {
 
     // Process each MSISDN and schedule SMS using stored procedure
     foreach ($ScheduleNumbers as $SendTo) {
+
+        file_put_contents($logFile, "[PROCESSING MSISDN] $SendTo\n", FILE_APPEND);
+
         $MSISDNLength = strlen($SendTo);
         if ($MSISDNLength > 10 && is_numeric($SendTo)) {
             $InitialMSISDN = substr($SendTo, -10);
@@ -130,38 +171,50 @@ if (isset($_REQUEST['Save']) && $_REQUEST['Save'] === 'Save') {
             $MSISDN = $SendTo;
             $InMSgID = $MSISDN . date('YmdHis') . rand(1, 99);
 
-            // Prepare the SQL command to call PermitSMSProc stored procedure
-            $SMSPermitQuery = "
-                DECLARE @returnValue INT;
-                EXEC @returnValue = BULKSMSPanel.dbo.PermitSMSProc
-                    @UserName = ?,
-                    @Password = ?,
-                    @RequestedIP = ?,
-                    @SendFrom = ?,
-                    @SendTo = ?,
-                    @InMSgID = ?,
-                    @ScheduleTime = ?,
-                    @msg = ?;
-                SELECT @returnValue AS ReturnVal;
-            ";
+            file_put_contents($logFile, "[CALL STORED PROCEDURE] MSISDN: $SendTo, MsgID: $InMSgID\n", FILE_APPEND);
 
-            $stmtPermitSMS = odbc_prepare($cn, $SMSPermitQuery);
-            odbc_execute($stmtPermitSMS, [
-                $UserName,
-                $Password,
-                $RequestedIP,
-                $SendFrom,
-                $SendTo,
-                $InMSgID,
-                $ScheduleTime,
-                $Msg
-            ]);
-            $PermitReturnValArray = odbc_fetch_array($stmtPermitSMS);
-            $PermitReturnVal = $PermitReturnValArray['ReturnVal'] ?? '';
+            // Log parameters before sending SMS
+            file_put_contents($logFile, "Sending SMS to: $SendTo\nMessage: $Msg\nScheduleTime: $ScheduleTime\nSendFrom: $SendFrom\nUserName: $UserName\n", FILE_APPEND);
+
+            $SMSPermitQuery = 'DECLARE @returnValue INT;';
+            $SMSPermitQuery .= 'EXEC @returnValue=[BULKSMSPanel].[dbo].[PermitSMSProc]';
+            $SMSPermitQuery .= "@UserName ='$UserName',";
+            $SMSPermitQuery .= "@Password ='$Password',";
+            $SMSPermitQuery .= "@RequestedIP='$RequestedIP',";
+            $SMSPermitQuery .= "@SendFrom ='$SendFrom',";
+            $SMSPermitQuery .= "@SendTo ='$SendTo',";
+            $SMSPermitQuery .= "@InMSgID ='$InMSgID',";
+            $SMSPermitQuery .= "@ScheduleTime ='$ScheduleTime',";
+            $SMSPermitQuery .= "@msg ='$Msg';";
+            $SMSPermitQuery .= "select @returnValue as ReturnVal; ";
+            $result = odbc_exec($cn, $SMSPermitQuery);
+            $PermitReturnValArray = odbc_fetch_array($result);
+            $PermitReturnVal = $PermitReturnValArray['ReturnVal'];
+
+            // Fetch return value from SELECT
+            $returnVal = null;
+            if ($ok && ($row = odbc_fetch_array($stmtPermitSMS))) {
+                $returnVal = $row['ReturnVal'];
+            }
+
+            // Log execution results
+            file_put_contents(
+                __DIR__ . '/debug_sms.log',
+                "[PROC EXECUTION] " . ($ok ? "Success" : "Failed") . PHP_EOL .
+                    "[PROC RETURN] ReturnVal: " . var_export($returnVal, true) . PHP_EOL,
+                FILE_APPEND
+            );
+            // --- END PermitSMSProc call (REPLACEMENT) ---
 
             if ($PermitReturnVal == '200') {
+
+                file_put_contents($logFile, "[SUCCESS] MSISDN $SendTo accepted with ReturnVal: $PermitReturnVal\n", FILE_APPEND);
+
                 $ValidNumCounter++;
             } else {
+
+                file_put_contents($logFile, "[ERROR] MSISDN $SendTo failed with error code: $PermitReturnVal\n", FILE_APPEND);
+
                 // Log error codes for invalid messages
                 $StatusCode = $PermitReturnVal;
                 $sql_error = "SELECT ErrorCode, ErrorDescription, ActionTaken FROM BULKSMSPanel.dbo.ErrorCode WHERE ErrorCode = ?";
@@ -189,6 +242,8 @@ if (isset($_REQUEST['Save']) && $_REQUEST['Save'] === 'Save') {
 
     $url = base_url() . "index.php?parent=SchedulePromotion";
     popup('Schedule Created Successfully.', $url);
+
+    file_put_contents($logFile, "[FORM SUBMISSION END] Completed processing at " . date('Y-m-d H:i:s') . "\n\n", FILE_APPEND);
 }
 
 ?>

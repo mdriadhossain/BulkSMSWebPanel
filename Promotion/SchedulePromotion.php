@@ -250,11 +250,20 @@ $result_userDetail = odbc_exec($cn, $userDetail);
                                             }
                                             //echo $TemplateText = "SELECT TemplateSMS FROM BULKSMSPanel.dbo.TemplateText ";
                                             //exit;
-                                            $result_userDetail = odbc_exec($cn, $TemplateText);
-                                            while ($n = odbc_fetch_row($result_userDetail)) {
-                                                echo $TemplateSMS = odbc_result($result_userDetail, "TemplateSMS");
-                                                //$UserName = odbc_result($result_userDetail, "UserName");
-                                                echo "<option value='$TemplateSMS'>$TemplateSMS</option>";
+                                            // $result_userDetail = odbc_exec($cn, $TemplateText);
+                                            $result = $conn->query($TemplateText);
+
+                                            // while ($n = odbc_fetch_row($result_userDetail)) {
+                                            //     echo $TemplateSMS = odbc_result($result_userDetail, "TemplateSMS");
+                                            //     //$UserName = odbc_result($result_userDetail, "UserName");
+                                            //     echo "<option value='$TemplateSMS'>$TemplateSMS</option>";
+                                            // }
+
+                                            if ($result) {
+                                                while ($row = $result->fetch(PDO::FETCH_ASSOC)) {
+                                                    $TemplateSMS = $row['TemplateSMS']; // Column name from DB
+                                                    echo "<option value='$TemplateSMS'>$TemplateSMS</option>";
+                                                }
                                             }
                                             ?>
                                         </select>
